@@ -123,7 +123,7 @@ describe("Dice", function () {
       tx = await dice.connect(signers[1]).join(1, { value: bet });
       await tx.wait();
 
-      expect(
+      await expect(
         dice.connect(signers[2]).join(1, { value: bet })
       ).to.be.revertedWith("Game is already over");
     });
