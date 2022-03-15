@@ -24,7 +24,7 @@ contract Dice {
     event GameFinished(uint256 id, uint8[MAX_PLAYERS] results);
     event PlayerJoined(uint256 id, address player);
 
-    function create(uint8 playerCount) external payable {
+    function create(uint8 playerCount) external payable onlyEOA {
         require(msg.value >= MIN_BET, "Bet amount is too low");
         require(
             playerCount >= MIN_PLAYERS && playerCount <= MAX_PLAYERS,
@@ -81,7 +81,7 @@ contract Dice {
         }
     }
 
-    function join(uint256 _gameId) external payable {
+    function join(uint256 _gameId) external payable onlyEOA {
         Game storage game = games[_gameId];
         uint8 playerCount = game.playerCount;
 
@@ -127,7 +127,11 @@ contract Dice {
         revert("Game is not available");
     }
 
-    function randomResult(uint256 _gameId, uint8 playerIndex) internal view returns (uint8) {
+    function randomResult(uint256 _gameId, uint8 playerIndex)
+        internal
+        view
+        returns (uint8)
+    {
         // TODO: not production ready :(
         return
             uint8(
@@ -162,5 +166,10 @@ contract Dice {
         returns (address[MAX_PLAYERS] memory)
     {
         return games[_gameId].players;
+    }
+
+    modifier onlyEOA() {
+        require(msg.sender == tx.origin, "Caller is not an EOA");
+        _;
     }
 }

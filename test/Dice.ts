@@ -3,10 +3,11 @@ import { expect } from "chai";
 import { BigNumber, BigNumberish } from "ethers";
 import { parseEther } from "ethers/lib/utils";
 import { ethers } from "hardhat";
-import { Dice } from "../typechain";
+import { Dice, ContractPlayer } from "../typechain";
 
 describe("Dice", () => {
   let dice: Dice;
+  let contractPlayer: ContractPlayer;
   let signers: SignerWithAddress[];
 
   beforeEach(async () => {
@@ -14,6 +15,10 @@ describe("Dice", () => {
     signers = await ethers.getSigners();
     dice = await Dice.deploy();
     await dice.deployed();
+
+    const ContractPlayer = await ethers.getContractFactory("ContractPlayer");
+    contractPlayer = await ContractPlayer.deploy(dice.address);
+    await contractPlayer.deployed();
   });
 
   it("MIN_BET", async () => {
@@ -33,6 +38,14 @@ describe("Dice", () => {
   });
 
   describe("create", () => {
+    it("onlyEOA", async () => {
+      const bet = parseEther("1.0");
+      const playerCount = 2;
+      await expect(
+        contractPlayer.create(playerCount, { value: bet })
+      ).to.be.revertedWith("Caller is not an EOA");
+    });
+
     describe("Invalid Player Count", () => {
       [0, 1, 7, 100].forEach((playerCount) => {
         it("playerCount: " + playerCount, async () => {
@@ -174,6 +187,16 @@ describe("Dice", () => {
   });
 
   describe("join", () => {
+    it("onlyEOA", async () => {
+      const bet = parseEther("1.0");
+      const playerCount = 2;
+      const tx = await dice.create(playerCount, { value: bet });
+      await tx.wait();
+      await expect(contractPlayer.join(1, { value: bet })).to.be.revertedWith(
+        "Caller is not an EOA"
+      );
+    });
+
     it("You have already joined the game", async () => {
       const bet = parseEther("1.0");
       const playerCount = 2;
