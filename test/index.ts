@@ -1,10 +1,11 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
+import { BigNumber, BigNumberish } from "ethers";
 import { parseEther } from "ethers/lib/utils";
 import { ethers } from "hardhat";
 import { Dice } from "../typechain";
 
-describe("Dice", function () {
+describe("Dice", () => {
   let dice: Dice;
   let signers: SignerWithAddress[];
 
@@ -52,9 +53,11 @@ describe("Dice", function () {
       });
     });
 
-    it("creates a new game", async () => {
+    it("Create New Game", async () => {
       const bet = parseEther("1.0");
       const playerCount = 2;
+
+      expect(await ethers.provider.getBalance(dice.address)).to.be.equal(0);
 
       const tx = await dice.create(playerCount, {
         value: bet,
@@ -84,11 +87,93 @@ describe("Dice", function () {
     });
   });
 
-  describe("join", () => {
-    it("Game not found", async () => {
-      await expect(dice.join(0)).to.be.revertedWith("Game not found");
-    });
+  describe("calculatePayouts", () => {
+    const testCases: Array<
+      [
+        results: [number, number, number, number, number, number],
+        playerCount: number,
+        bet: BigNumber,
+        expected: [
+          BigNumberish,
+          BigNumberish,
+          BigNumberish,
+          BigNumberish,
+          BigNumberish,
+          BigNumberish
+        ]
+      ]
+    > = [
+      [
+        [1, 2, 0, 0, 0, 0],
+        2,
+        parseEther("0.1"),
+        [0, parseEther("0.2"), 0, 0, 0, 0],
+      ],
+      [
+        [3, 2, 0, 0, 0, 0],
+        2,
+        parseEther("0.1"),
+        [parseEther("0.2"), 0, 0, 0, 0, 0],
+      ],
+      [
+        [3, 3, 0, 0, 0, 0],
+        2,
+        parseEther("0.1"),
+        [parseEther("0.1"), parseEther("0.1"), 0, 0, 0, 0],
+      ],
+      [
+        [3, 3, 3, 3, 3, 3],
+        6,
+        parseEther("0.1"),
+        [
+          parseEther("0.1"),
+          parseEther("0.1"),
+          parseEther("0.1"),
+          parseEther("0.1"),
+          parseEther("0.1"),
+          parseEther("0.1"),
+        ],
+      ],
+      [
+        [5, 5, 3, 3, 3, 3],
+        6,
+        parseEther("0.1"),
+        [parseEther("0.3"), parseEther("0.3"), 0, 0, 0, 0],
+      ],
+      [
+        [5, 5, 1, 2, 3, 5],
+        6,
+        parseEther("0.1"),
+        [parseEther("0.2"), parseEther("0.2"), 0, 0, 0, parseEther("0.2")],
+      ],
+      [
+        [6, 6, 6, 1, 1, 0],
+        5,
+        parseEther("1.25"),
+        [
+          BigNumber.from("0x1ce97ca0f2105555"),
+          BigNumber.from("0x1ce97ca0f2105555"),
+          BigNumber.from("0x1ce97ca0f2105555"),
+          0,
+          0,
+          0,
+        ],
+      ],
+    ];
 
+    testCases.forEach(([results, playerCount, bet, expected], i) => {
+      it(`#${i} ${JSON.stringify({
+        results,
+        playerCount,
+        bet: bet.toString(),
+      })}`, async () => {
+        const payouts = await dice.calculatePayouts(results, playerCount, bet);
+        expect(payouts).to.eql(expected.map(BigNumber.from));
+      });
+    });
+  });
+
+  describe("join", () => {
     it("You have already joined the game", async () => {
       const bet = parseEther("1.0");
       const playerCount = 2;
@@ -113,7 +198,11 @@ describe("Dice", function () {
       ).to.be.revertedWith("Invalid bet amount");
     });
 
-    it("Game is already over", async () => {
+    it("Game is not available", async () => {
+      // not found
+      await expect(dice.join(0)).to.be.revertedWith("Game is not available");
+
+      // already over
       const bet = parseEther("1.0");
       const playerCount = 2;
 
@@ -125,26 +214,55 @@ describe("Dice", function () {
 
       await expect(
         dice.connect(signers[2]).join(1, { value: bet })
-      ).to.be.revertedWith("Game is already over");
+      ).to.be.revertedWith("Game is not available");
     });
 
-    it("updates game.results", async () => {
-      const bet = parseEther("1.0");
-      const playerCount = 2;
+    for (let playerCount = 2; playerCount <= 6; playerCount++) {
+      it(`Finish Game (playersCount=${playerCount})`, async () => {
+        const bet = parseEther("1.0");
+        const players = [...Array(playerCount)].map((_, i) => signers[i]);
 
-      let tx = await dice.create(playerCount, { value: bet });
-      await tx.wait();
+        const tx = await dice.connect(players[0]).create(playerCount, {
+          value: bet,
+        });
 
-      let results = await dice.results(1);
-      expect(results[0]).to.be.equal(0);
-      expect(results[1]).to.be.equal(0);
+        await tx.wait();
 
-      tx = await dice.connect(signers[1]).join(1, { value: bet });
-      await tx.wait();
+        const balances = await Promise.all(
+          players.map((player) => player.getBalance())
+        );
 
-      results = await dice.results(1);
-      expect(results[0]).to.be.greaterThan(0);
-      expect(results[1]).to.be.greaterThan(0);
-    });
+        await Promise.all(
+          players.map(async (player, i) => {
+            // Creator
+            if (i === 0) return;
+
+            const tx = await dice.connect(player).join(1, {
+              value: bet,
+            });
+
+            const receipt = await tx.wait();
+            balances[i] = balances[i]
+              .sub(receipt.gasUsed.mul(receipt.effectiveGasPrice))
+              .sub(bet);
+          })
+        );
+
+        const results = await dice.results(1);
+        const payouts = await dice.calculatePayouts(results, playerCount, bet);
+
+        const newBalances = await Promise.all(
+          players.map((player) => player.getBalance())
+        );
+
+        balances.forEach((balance, i) => {
+          expect(balance.add(payouts[i])).to.be.eq(newBalances[i]);
+        });
+
+        players.forEach((_, i) => {
+          expect(results[i]).to.be.greaterThan(0);
+        });
+      });
+    }
   });
 });
