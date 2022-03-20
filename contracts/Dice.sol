@@ -45,11 +45,18 @@ contract Dice {
         uint8 min = MAX_RESULT + 1;
         uint8 max = MIN_RESULT - 1;
 
+        uint8 winners = 0;
+
         for (uint8 p = 0; p < playerCount; p++) {
             uint8 res = _results[p];
 
+            if (res == max) {
+                winners++;
+            }
+
             if (res > max) {
                 max = res;
+                winners = 1;
             }
 
             if (res < min) {
@@ -65,18 +72,11 @@ contract Dice {
             return _payouts;
         }
 
-        uint8 winners = 0;
-        uint256 totalBetAmount = bet * playerCount;
+        uint256 winnerPayout = (bet * playerCount) / winners;
 
         for (uint8 p = 0; p < playerCount; p++) {
             if (_results[p] == max) {
-                winners++;
-            }
-        }
-
-        for (uint8 p = 0; p < playerCount; p++) {
-            if (_results[p] == max) {
-                _payouts[p] = totalBetAmount / winners;
+                _payouts[p] = winnerPayout;
             }
         }
     }
